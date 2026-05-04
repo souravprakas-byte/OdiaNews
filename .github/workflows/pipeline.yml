@@ -3,7 +3,7 @@ name: Odisha News Pipeline
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/15 * * * *"  # allows manual run
+    - cron: "*/5 * * * *"
 
 jobs:
   run-pipeline:
@@ -11,23 +11,24 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
+          python-version: 3.11
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          pip install requests feedparser python-dateutil scikit-learn
 
       - name: Run pipeline
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python pipeline.py
+
+      - name: Commit DB updates
         run: |
-          python pipeline.py
+          git config --global user.name "news-bot"
+          git config --global user.email "bot@github.com"
+          git add news_db.json
+          git commit -m "auto: update news db" || echo "no changes"
+          git push
