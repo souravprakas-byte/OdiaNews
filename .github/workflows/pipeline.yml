@@ -3,17 +3,11 @@ name: Odisha News Pipeline
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/15 * * * *"
 
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
-
-    env:
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-      CHAT_ID: ${{ secrets.CHAT_ID }}
 
     steps:
       - name: Checkout repo
@@ -22,20 +16,18 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.11
+          python-version: "3.11"
 
-      - - name: Install dependencies
-  run: |
-    pip install requests feedparser python-dateutil scikit-learn
-    pip install sentence-transformers
+      - name: Install dependencies
+        run: |
+          pip install requests feedparser python-dateutil scikit-learn
+          pip install sentence-transformers
 
       - name: Run pipeline
-        run: python pipeline.py
-
-      - name: Commit DB updates
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          git config --global user.name "news-bot"
-          git config --global user.email "bot@github.com"
-          git add news_db.json
-          git commit -m "auto: update news db" || echo "no changes"
-          git push
+          python pipeline.py
