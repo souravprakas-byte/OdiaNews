@@ -170,24 +170,60 @@ class TelegramNotifier:
         self.chat_id = chat_id.strip()
 
     def send(self, processed: ProcessedArticle) -> None:
+        import requests
+        import os
+
+        BOT_TOKEN = os.getenv("BOT_TOKEN")
+        CHAT_ID = os.getenv("CHAT_ID")
+
+        if not BOT_TOKEN or not CHAT_ID:
+            print("Telegram skipped: missing BOT_TOKEN or CHAT_ID")
+            return
+
+        score = processed.urgency_score or 0
+        if score >= 4:
+            emoji = "🔥"
+        elif score >= 3:
+            emoji = "⚠️"
+        else:
+            emoji = "🟢"
+
+        title = safe_markdown(processed.headline)
+        category = safe_markdown(", ".join(processed.categories))
+        summary = safe_markdown(processed.odia_summary)
+        url = processed.raw_url
+
+        message = f"""
+{emoji} {title}
+
+📊 Urgency: {score}/5
+🏷 Category: {category}
+
+🧠 Summary:
+{summary}
+
+🔗 {url}
+"""
+
         try:
-            message = f"{processed.headline}\n\n{processed.odia_summary}"
-            payload = {
-                "chat_id": self.chat_id,
-                "text": message[:4000],
-                "disable_web_page_preview": True,
-            }
-            request = Request(
-                f"https://api.telegram.org/bot{self.bot_token}/sendMessage",
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
+            response = requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": CHAT_ID,
+                    "text": message[:4000],
+                    "parse_mode": "Markdown",
+                },
+                timeout=10,
             )
-            with urlopen(request, timeout=20) as response:
-                print(f"Telegram response status: {response.status}")
-                response.read()
-        except Exception as exc:
-            print(f"Telegram send failed: {exc}")
+
+            print(f"Telegram response status: {response.status_code}")
+            if response.status_code != 200:
+                print("Telegram error:", response.text)
+            else:
+                print("Telegram alert sent")
+
+        except Exception as e:
+            print("Telegram exception:", str(e))
 
 
 class SupabaseAICache:
@@ -433,7 +469,6 @@ def main() -> None:
     )
     provider = build_intelligence_provider()
     notifier = build_telegram_notifier()
-    telegram_threshold = telegram_urgency_threshold()
 
     if not articles:
         print("No RSS articles fetched.")
@@ -454,10 +489,10 @@ def main() -> None:
         print("Processed stored")
         print(f"Urgency score: {processed.urgency_score}")
 
-        if notifier and processed.urgency_score >= telegram_threshold:
+        if notifier:
             try:
                 notifier.send(processed)
-                print("Telegram alert sent")
+                print(f"Telegram sent | urgency={processed.urgency_score}")
             except Exception as exc:
                 print(f"Telegram alert failed: {exc}")
 
@@ -509,6 +544,10 @@ def telegram_urgency_threshold() -> int:
     except ValueError:
         print(f"Invalid TELEGRAM_URGENCY_THRESHOLD={value}; using 4")
         return 4
+
+
+def safe_markdown(text: object) -> str:
+    return str(text).replace("_", "").replace("*", "")
 
 
 def mask_headers(headers: dict[str, str]) -> dict[str, str]:
