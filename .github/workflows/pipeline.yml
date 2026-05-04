@@ -22,6 +22,7 @@ jobs:
         run: |
           pip install requests feedparser python-dateutil scikit-learn
           pip install sentence-transformers
+          pip install supabase
 
       - name: Run pipeline
         env:
