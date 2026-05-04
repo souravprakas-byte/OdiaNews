@@ -1,0 +1,148 @@
+sources:
+  - id: sambad
+    name: Sambad
+    language: odia
+    homepage: https://sambad.in/
+    priority: 5
+    methods: [rss, sitemap, html]
+    notes: Leading Odia daily; part of Sambad Group.
+
+  - id: sambad_english
+    name: Sambad English
+    language: english
+    homepage: https://sambadenglish.com/
+    priority: 4
+    methods: [rss, sitemap, html]
+
+  - id: kanak_news
+    name: Kanak News
+    language: odia
+    homepage: https://kanaknews.com/
+    priority: 5
+    methods: [rss, sitemap, html]
+
+  - id: otv
+    name: Odisha TV
+    language: odia
+    homepage: https://odishatv.in/
+    priority: 5
+    methods: [rss, sitemap, html]
+
+  - id: kalinga_tv
+    name: Kalinga TV
+    language: english
+    homepage: https://kalingatv.com/
+    priority: 4
+    methods: [rss, sitemap, html]
+
+  - id: dharitri
+    name: Dharitri
+    language: odia
+    homepage: https://www.dharitri.com/
+    priority: 4
+    methods: [rss, sitemap, html]
+
+  - id: orissa_post
+    name: OrissaPOST
+    language: english
+    homepage: https://www.orissapost.com/
+    priority: 4
+    methods: [rss, sitemap, html]
+
+  - id: the_samaja
+    name: The Samaja
+    language: odia
+    homepage: https://samajaepaper.in/
+    priority: 4
+    methods: [sitemap, html]
+
+  - id: pragativadi
+    name: Pragativadi
+    language: english
+    homepage: https://pragativadi.com/
+    priority: 4
+    methods: [rss, sitemap, html]
+
+  - id: prameya
+    name: Prameya
+    language: odia
+    homepage: https://www.prameya.com/
+    priority: 4
+    methods: [rss, sitemap, html]
+
+  - id: news7
+    name: Prameya News7
+    language: odia
+    homepage: https://www.prameyanews7.com/
+    priority: 4
+    methods: [rss, sitemap, html]
+
+  - id: odisha_bhaskar
+    name: Odisha Bhaskar
+    language: odia
+    homepage: https://odishabhaskar.com/
+    priority: 4
+    methods: [rss, sitemap, html]
+
+  - id: argus_news
+    name: Argus News
+    language: odia
+    homepage: https://argusnews.in/
+    priority: 4
+    methods: [rss, sitemap, html]
+
+  - id: nandighosha_tv
+    name: Nandighosha TV
+    language: odia
+    homepage: https://nandighoshatv.com/
+    priority: 4
+    methods: [rss, sitemap, html]
+
+  - id: bada_khabar
+    name: Bada Khabar
+    language: odia
+    homepage: https://badakhabar.in/
+    priority: 3
+    methods: [rss, sitemap, html]
+
+  - id: news18_odia
+    name: News18 Odia
+    language: odia
+    homepage: https://odia.news18.com/
+    priority: 4
+    methods: [rss, sitemap, html]
+
+  - id: zee_odisha
+    name: Zee Odisha News
+    language: odia
+    homepage: https://zeenews.india.com/odia/
+    priority: 3
+    methods: [rss, sitemap, html]
+
+  - id: odisha_bytes
+    name: Odisha Bytes
+    language: english
+    homepage: https://odishabytes.com/
+    priority: 4
+    methods: [rss, sitemap, html]
+
+  - id: odisha_sun_times
+    name: Odisha Sun Times
+    language: english
+    homepage: https://odishasuntimes.com/
+    priority: 3
+    methods: [rss, sitemap, html]
+
+  - id: odishatoday
+    name: Odisha Today
+    language: english
+    homepage: https://odishatoday.com/
+    priority: 2
+    methods: [sitemap, html]
+
+  - id: localwire
+    name: LocalWire
+    language: english
+    homepage: https://localwire.me/
+    priority: 2
+    methods: [sitemap, html]
