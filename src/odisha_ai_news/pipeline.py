@@ -7,7 +7,7 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from pathlib import Path
@@ -27,6 +27,14 @@ from odisha_ai_news.ai_processing import (
 )
 from odisha_ai_news.dedupe import cluster_articles
 from odisha_ai_news.models import EntityType, Language, ProcessedArticle, RawArticle, Source
+from odisha_ai_news.utils.dedupe import (
+    content_hash,
+    dedupe_base,
+    hamming_distance,
+    simple_simhash,
+    title_key,
+    title_similarity,
+)
 
 
 RSS_FEEDS = [
@@ -82,7 +90,38 @@ class SupabaseClient:
         )
         return bool(json.loads(response.decode("utf-8")))
 
-    def insert_article(self, article: RawArticle) -> int | str:
+    def get_last_processed_time(self) -> str | None:
+        response = self._request(
+            "GET",
+            "/rest/v1/articles?select=created_at&order=created_at.desc&limit=1",
+        )
+        rows = json.loads(response.decode("utf-8"))
+        if rows:
+            return rows[0].get("created_at")
+        return None
+
+    def content_hash_exists(self, hash_value: str) -> bool:
+        response = self._request(
+            "GET",
+            f"/rest/v1/articles?content_hash=eq.{hash_value}&select=id&limit=1",
+        )
+        return bool(json.loads(response.decode("utf-8")))
+
+    def recent_dedupe_records(self, limit: int = 250) -> list[dict[str, object]]:
+        response = self._request(
+            "GET",
+            f"/rest/v1/articles?select=title_norm,simhash&order=published_at.desc.nullslast&limit={limit}",
+        )
+        return json.loads(response.decode("utf-8"))
+
+    def insert_article(
+        self,
+        article: RawArticle,
+        *,
+        content_hash_value: str | None = None,
+        title_norm: str | None = None,
+        simhash_value: str | None = None,
+    ) -> int | str:
         payload = {
             "title": article.title,
             "source": article.source_id,
@@ -90,6 +129,9 @@ class SupabaseClient:
             "content": article.body_text,
             "image_url": article.image_url,
             "published_at": datetime_to_iso(article.published_at),
+            "content_hash": content_hash_value,
+            "title_norm": title_norm,
+            "simhash": simhash_value,
         }
         response = self._request(
             "POST",
@@ -422,6 +464,57 @@ def parse_feed_datetime(value: str) -> datetime | None:
         return None
 
 
+def get_entry_time(entry: object) -> datetime | None:
+    if isinstance(entry, RawArticle):
+        return entry.published_at
+
+    try:
+        published = getattr(entry, "published_parsed", None)
+        if published:
+            return datetime(*published[:6])
+    except Exception:
+        pass
+
+    try:
+        updated = getattr(entry, "updated_parsed", None)
+        if updated:
+            return datetime(*updated[:6])
+    except Exception:
+        pass
+
+    return None
+
+
+def get_last_processed_time(supabase: SupabaseClient) -> str | None:
+    return supabase.get_last_processed_time()
+
+
+def should_skip_old_article(entry_time: datetime | None, last_time: str | None) -> bool:
+    if entry_time is None:
+        return False
+
+    entry_time_utc = as_utc(entry_time)
+    now_utc = datetime.now(timezone.utc)
+
+    if now_utc - entry_time_utc > timedelta(hours=24):
+        print("Skipped >24h old article")
+        return True
+
+    if last_time:
+        last_time_dt = datetime.fromisoformat(last_time.replace("Z", "+00:00"))
+        if entry_time_utc <= as_utc(last_time_dt):
+            print("Skipped old article")
+            return True
+
+    return False
+
+
+def as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def datetime_to_iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
@@ -494,6 +587,7 @@ def main() -> None:
         require_env("SUPABASE_URL"),
         require_env("SUPABASE_KEY"),
     )
+    last_time = get_last_processed_time(supabase)
     provider = build_intelligence_provider()
     notifier = build_telegram_notifier()
 
@@ -504,6 +598,11 @@ def main() -> None:
             print(f"Fetched articles: {len(entries)}")
 
             for article in entries:
+                entry_time = get_entry_time(article)
+                if should_skip_old_article(entry_time, last_time):
+                    continue
+
+                print("Processing new article")
                 process_fetched_article(
                     article,
                     feed_url=feed_url,
@@ -530,10 +629,34 @@ def process_fetched_article(
     print(f"Article URL before processing: {article.url}")
 
     if supabase.article_exists(article.url):
-        print("Skipped duplicate")
+        print("Skipped duplicate (url)")
         return
 
-    article_id = supabase.insert_article(article)
+    title_norm = title_key(article.title)
+    hash_value = content_hash(article.title, article.body_text)
+    simhash_value = simple_simhash(dedupe_base(article.title, article.body_text))
+
+    if supabase.content_hash_exists(hash_value):
+        print("Skipped duplicate (hash)")
+        return
+
+    recent_records = supabase.recent_dedupe_records(limit=250)
+    duplicate_reason = find_recent_duplicate(
+        title_norm=title_norm,
+        simhash_value=simhash_value,
+        recent_records=recent_records,
+    )
+    if duplicate_reason:
+        print(duplicate_reason)
+        return
+
+    article_id = supabase.insert_article(
+        article,
+        content_hash_value=hash_value,
+        title_norm=title_norm,
+        simhash_value=simhash_value,
+    )
+    print("Inserted new article")
     print("Inserted to Supabase")
 
     processed = process_article(article, cluster_id="test-run", provider=provider)
@@ -555,6 +678,30 @@ def process_fetched_article(
     print(f"urgency_score: {processed.urgency_score}")
     print(f"source: {feed_url}")
     print()
+
+
+def find_recent_duplicate(
+    *,
+    title_norm: str,
+    simhash_value: str,
+    recent_records: list[dict[str, object]],
+) -> str | None:
+    for record in recent_records:
+        existing_title = str(record.get("title_norm") or "")
+        if existing_title:
+            similarity = title_similarity(title_norm, existing_title)
+            if similarity >= 90:
+                return f"Skipped duplicate (title similarity: {similarity})"
+
+        existing_simhash = str(record.get("simhash") or "")
+        if existing_simhash:
+            try:
+                if hamming_distance(simhash_value, existing_simhash) <= 3:
+                    return "Skipped duplicate (simhash)"
+            except ValueError:
+                continue
+
+    return None
 
 
 def require_env(name: str) -> str:
