@@ -8,3 +8,4 @@ sentence-transformers
 supabase
 numpy
 rapidfuzz
+websockets==11.0.3
