@@ -2,9 +2,8 @@ name: Odisha News Pipeline
 
 on:
   workflow_dispatch:
-
   schedule:
-    - cron: "*/15 * * * *"   # every 15 minutes
+    - cron: "*/15 * * * *"
 
 jobs:
   run-pipeline:
@@ -18,31 +17,32 @@ jobs:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
     steps:
-      # 1️⃣ Checkout repo
+      # 1. Checkout
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      # 2️⃣ Setup Python
+      # 2. Setup Python
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
-      # 3️⃣ Install dependencies (FIXED)
+      # 3. Install dependencies (FIXED + COMPLETE)
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install requests feedparser python-dateutil
-          pip install sentence-transformers scikit-learn numpy
+          pip install numpy scikit-learn
+          pip install sentence-transformers
           pip install supabase
 
-      # 4️⃣ Run pipeline
+      # 4. Run pipeline
       - name: Run pipeline
         run: |
           python pipeline.py
 
-      # 5️⃣ Optional: commit local DB/log (SAFE VERSION)
-      - name: Commit DB updates (optional)
+      # 5. Optional commit (safe)
+      - name: Commit DB updates
         run: |
           git config --global user.name "news-bot"
           git config --global user.email "bot@github.com"
