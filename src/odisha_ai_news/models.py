@@ -13,6 +13,7 @@ class Language(StrEnum):
 
 
 class Category(StrEnum):
+    GENERAL = "general"
     POLITICS = "politics"
     CRIME = "crime"
     BUSINESS = "business"

@@ -20,8 +20,10 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from odisha_ai_news.ai_processing import (
+    AIAnalysisCache,
     ArticleIntelligenceProvider,
-    PlaceholderIntelligenceProvider,
+    HuggingFaceArticleIntelligenceProvider,
+    SimpleFallbackProcessor,
     process_article,
 )
 from odisha_ai_news.dedupe import cluster_articles
@@ -99,6 +101,30 @@ class SupabaseClient:
         }
         self._request("POST", "/rest/v1/processed_articles", payload)
 
+    def get_ai_cache(self, article_url: str) -> dict[str, object] | None:
+        encoded_url = quote(article_url, safe="")
+        response = self._request(
+            "GET",
+            f"/rest/v1/ai_cache?url=eq.{encoded_url}&select=result&limit=1",
+        )
+        rows = json.loads(response.decode("utf-8"))
+        if not rows:
+            return None
+        result = rows[0].get("result")
+        return result if isinstance(result, dict) else None
+
+    def set_ai_cache(self, article_url: str, result: dict[str, object]) -> None:
+        payload = {
+            "url": article_url,
+            "result": result,
+        }
+        self._request(
+            "POST",
+            "/rest/v1/ai_cache?on_conflict=url",
+            payload,
+            prefer="resolution=merge-duplicates",
+        )
+
     def _request(
         self,
         method: str,
@@ -116,7 +142,7 @@ class SupabaseClient:
         if prefer:
             headers["Prefer"] = prefer
 
-        print(f"Supabase request headers: {headers}")
+        print(f"Supabase request headers: {mask_headers(headers)}")
 
         request = Request(
             f"{self.url}{path}",
@@ -136,6 +162,50 @@ class SupabaseClient:
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+
+
+class TelegramNotifier:
+    def __init__(self, bot_token: str, chat_id: str) -> None:
+        self.bot_token = bot_token.strip()
+        self.chat_id = chat_id.strip()
+
+    def send(self, processed: ProcessedArticle) -> None:
+        try:
+            message = f"{processed.headline}\n\n{processed.odia_summary}"
+            payload = {
+                "chat_id": self.chat_id,
+                "text": message[:4000],
+                "disable_web_page_preview": True,
+            }
+            request = Request(
+                f"https://api.telegram.org/bot{self.bot_token}/sendMessage",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(request, timeout=20) as response:
+                print(f"Telegram response status: {response.status}")
+                response.read()
+        except Exception as exc:
+            print(f"Telegram send failed: {exc}")
+
+
+class SupabaseAICache:
+    def __init__(self, supabase: SupabaseClient) -> None:
+        self.supabase = supabase
+
+    def get(self, article_url: str) -> dict[str, object] | None:
+        try:
+            return self.supabase.get_ai_cache(article_url)
+        except Exception as exc:
+            print(f"AI cache lookup failed for {article_url}: {exc}")
+            return None
+
+    def set(self, article_url: str, payload: dict[str, object]) -> None:
+        try:
+            self.supabase.set_ai_cache(article_url, payload)
+        except Exception as exc:
+            print(f"AI cache store failed for {article_url}: {exc}")
 
 
 def run_processing_cycle(
@@ -357,11 +427,13 @@ def main() -> None:
     sources = load_sources(config_path)
     articles = fetch_rss_articles(sources, max_articles=3)
     print(f"Fetched articles: {len(articles)}")
-    provider = PlaceholderIntelligenceProvider()
     supabase = SupabaseClient(
         require_env("SUPABASE_URL"),
         require_env("SUPABASE_KEY"),
     )
+    provider = build_intelligence_provider()
+    notifier = build_telegram_notifier()
+    telegram_threshold = telegram_urgency_threshold()
 
     if not articles:
         print("No RSS articles fetched.")
@@ -369,6 +441,7 @@ def main() -> None:
 
     for article in articles:
         print(f"Article title before processing: {article.title}")
+        print(f"Article URL before processing: {article.url}")
         if supabase.article_exists(article.url):
             print("Skipped duplicate")
             continue
@@ -379,6 +452,14 @@ def main() -> None:
         processed = process_article(article, cluster_id="test-run", provider=provider)
         supabase.insert_processed(article_id, processed)
         print("Processed stored")
+        print(f"Urgency score: {processed.urgency_score}")
+
+        if notifier and processed.urgency_score >= telegram_threshold:
+            try:
+                notifier.send(processed)
+                print("Telegram alert sent")
+            except Exception as exc:
+                print(f"Telegram alert failed: {exc}")
 
         print(f"title: {processed.headline}")
         print(f"summary_odia: {processed.odia_summary}")
@@ -392,6 +473,56 @@ def require_env(name: str) -> str:
     if not value:
         raise RuntimeError(f"Missing required environment variable: {name}")
     return value
+
+
+def optional_env(name: str) -> str | None:
+    value = os.environ.get(name)
+    return value.strip() if value and value.strip() else None
+
+
+def build_intelligence_provider() -> ArticleIntelligenceProvider:
+    token = os.getenv("HF_API_TOKEN")
+    if token:
+        print("Using HuggingFace provider")
+        return HuggingFaceArticleIntelligenceProvider(token)
+    else:
+        print("No HF token, using fallback")
+        return SimpleFallbackProcessor()
+
+
+def build_telegram_notifier() -> TelegramNotifier | None:
+    bot_token = optional_env("BOT_TOKEN")
+    chat_id = optional_env("CHAT_ID")
+    if not bot_token or not chat_id:
+        print("Telegram env missing; alerts disabled")
+        return None
+    return TelegramNotifier(bot_token, chat_id)
+
+
+def telegram_urgency_threshold() -> int:
+    value = optional_env("TELEGRAM_URGENCY_THRESHOLD")
+    if not value:
+        return 4
+
+    try:
+        return int(value)
+    except ValueError:
+        print(f"Invalid TELEGRAM_URGENCY_THRESHOLD={value}; using 4")
+        return 4
+
+
+def mask_headers(headers: dict[str, str]) -> dict[str, str]:
+    masked = dict(headers)
+    for key in ("apikey", "Authorization"):
+        if key in masked:
+            masked[key] = mask_secret(masked[key])
+    return masked
+
+
+def mask_secret(value: str) -> str:
+    if len(value) <= 12:
+        return "***"
+    return f"{value[:6]}...{value[-4:]}"
 
 
 if __name__ == "__main__":
