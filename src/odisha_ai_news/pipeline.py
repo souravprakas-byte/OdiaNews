@@ -1,11 +1,10 @@
-from __future__ import annotations
-
-print("MODULE LOADED")
+﻿from __future__ import annotations
 
 import html
 import json
 import os
 import sys
+import time
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from datetime import datetime
@@ -28,7 +27,30 @@ from odisha_ai_news.ai_processing import (
 )
 from odisha_ai_news.dedupe import cluster_articles
 from odisha_ai_news.models import EntityType, Language, ProcessedArticle, RawArticle, Source
-from odisha_ai_news.source_config import load_sources
+
+
+RSS_FEEDS = [
+    "https://khabarodisha.com/rss",
+    "https://odishanewsmakers.com/rss/latest-posts",
+    "https://odishanewsmakers.com/rss/category/state-76",
+    "https://odishanewsmakers.com/rss/category/city-74",
+    "https://odia.oneindia.com/rss/feeds/odia-news-fb.xml",
+    "https://odia.oneindia.com/rss/feeds/odia-odisha-fb.xml",
+    "https://odia.oneindia.com/rss/feeds/odia-national-fb.xml",
+    "https://odia.oneindia.com/rss/feeds/odia-business-fb.xml",
+    "https://odia.oneindia.com/rss/feeds/odia-sports-fb.xml",
+    "https://odia.oneindia.com/rss/feeds/odia-entertainment-fb.xml",
+    "https://indianexpress.com/section/india/feed/",
+    "https://indianexpress.com/section/politics/feed/",
+    "https://indianexpress.com/section/business/feed/",
+    "https://indianexpress.com/section/sports/feed/",
+    "https://indianexpress.com/section/world/feed/",
+    "https://indianexpress.com/section/technology/feed/",
+    "https://indianexpress.com/section/cities/feed/",
+    "https://timesofindia.indiatimes.com/rss.cms",
+    "https://www.thebetterindia.com/tags/bhubaneswar/feed/feed",
+    "https://www.odiastatenews.in/rss/latest-posts",
+]
 
 
 class ArticleStore:
@@ -170,8 +192,8 @@ class TelegramNotifier:
         self.chat_id = chat_id.strip()
 
     def send(self, processed: ProcessedArticle) -> None:
-        import requests
         import os
+        import requests
 
         BOT_TOKEN = os.getenv("BOT_TOKEN")
         CHAT_ID = os.getenv("CHAT_ID")
@@ -182,27 +204,27 @@ class TelegramNotifier:
 
         score = processed.urgency_score or 0
         if score >= 4:
-            emoji = "🔥"
+            emoji = "\U0001f525"
         elif score >= 3:
-            emoji = "⚠️"
+            emoji = "\u26a0\ufe0f"
         else:
-            emoji = "🟢"
+            emoji = "\U0001f7e2"
 
         title = safe_markdown(processed.headline)
+        summary = safe_markdown(processed.odia_summary[:300])
         category = safe_markdown(", ".join(processed.categories))
-        summary = safe_markdown(processed.odia_summary)
         url = processed.raw_url
 
         message = f"""
-{emoji} {title}
+\U0001f6a8 URGENCY: {score}/5
 
-📊 Urgency: {score}/5
-🏷 Category: {category}
+\U0001f4f0 {emoji} {title}
 
-🧠 Summary:
-{summary}
+\U0001f9e0 {summary}
 
-🔗 {url}
+\U0001f3f7 {category}
+
+\U0001f517 {url}
 """
 
         try:
@@ -215,15 +237,12 @@ class TelegramNotifier:
                 },
                 timeout=10,
             )
-
-            print(f"Telegram response status: {response.status_code}")
-            if response.status_code != 200:
-                print("Telegram error:", response.text)
-            else:
+            print("Telegram response status:", response.status_code)
+            print("Telegram response:", response.text)
+            if response.status_code == 200:
                 print("Telegram alert sent")
-
         except Exception as e:
-            print("Telegram exception:", str(e))
+            print("Telegram error:", str(e))
 
 
 class SupabaseAICache:
@@ -289,6 +308,18 @@ def fetch_rss_articles(sources: list[Source], *, max_articles: int = 3) -> list[
             return articles[:max_articles]
 
     return articles[:max_articles]
+
+
+def fetch_rss(feed_url: str) -> list[RawArticle]:
+    source = Source(
+        id=feed_url,
+        name=feed_url,
+        language=Language.MIXED,
+        homepage=feed_url,
+        priority=3,
+        methods=("rss",),
+    )
+    return fetch_feed(source, feed_url)
 
 
 def rss_candidates(homepage: str) -> tuple[str, ...]:
@@ -458,11 +489,7 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
-    print("PIPELINE STARTED - CONFIRMED")
-    config_path = Path(__file__).resolve().parents[2] / "config" / "sources.yaml"
-    sources = load_sources(config_path)
-    articles = fetch_rss_articles(sources, max_articles=3)
-    print(f"Fetched articles: {len(articles)}")
+    print("Pipeline started")
     supabase = SupabaseClient(
         require_env("SUPABASE_URL"),
         require_env("SUPABASE_KEY"),
@@ -470,37 +497,64 @@ def main() -> None:
     provider = build_intelligence_provider()
     notifier = build_telegram_notifier()
 
-    if not articles:
-        print("No RSS articles fetched.")
+    for feed_url in RSS_FEEDS:
+        try:
+            print(f"Fetching: {feed_url}")
+            entries = fetch_rss(feed_url)
+            print(f"Fetched articles: {len(entries)}")
+
+            for article in entries:
+                process_fetched_article(
+                    article,
+                    feed_url=feed_url,
+                    supabase=supabase,
+                    provider=provider,
+                    notifier=notifier,
+                )
+
+            time.sleep(1)
+
+        except Exception as e:
+            print(f"Feed failed: {feed_url} | Error: {e}")
+
+
+def process_fetched_article(
+    article: RawArticle,
+    *,
+    feed_url: str,
+    supabase: SupabaseClient,
+    provider: ArticleIntelligenceProvider,
+    notifier: TelegramNotifier | None,
+) -> None:
+    print(f"Processing: {article.title}")
+    print(f"Article URL before processing: {article.url}")
+
+    if supabase.article_exists(article.url):
+        print("Skipped duplicate")
         return
 
-    for article in articles:
-        print(f"Article title before processing: {article.title}")
-        print(f"Article URL before processing: {article.url}")
-        if supabase.article_exists(article.url):
-            print("Skipped duplicate")
-            continue
+    article_id = supabase.insert_article(article)
+    print("Inserted to Supabase")
 
-        article_id = supabase.insert_article(article)
-        print("Inserted article")
+    processed = process_article(article, cluster_id="test-run", provider=provider)
+    supabase.insert_processed(article_id, processed)
+    print("Processed stored")
+    print(f"Urgency score: {processed.urgency_score}")
 
-        processed = process_article(article, cluster_id="test-run", provider=provider)
-        supabase.insert_processed(article_id, processed)
-        print("Processed stored")
-        print(f"Urgency score: {processed.urgency_score}")
+    if notifier:
+        try:
+            notifier.send(processed)
+            print("Telegram sent")
+            time.sleep(2)
+        except Exception as exc:
+            print(f"Telegram alert failed: {exc}")
 
-        if notifier:
-            try:
-                notifier.send(processed)
-                print(f"Telegram sent | urgency={processed.urgency_score}")
-            except Exception as exc:
-                print(f"Telegram alert failed: {exc}")
-
-        print(f"title: {processed.headline}")
-        print(f"summary_odia: {processed.odia_summary}")
-        print(f"category: {', '.join(processed.categories)}")
-        print(f"urgency_score: {processed.urgency_score}")
-        print()
+    print(f"title: {processed.headline}")
+    print(f"summary_odia: {processed.odia_summary}")
+    print(f"category: {', '.join(processed.categories)}")
+    print(f"urgency_score: {processed.urgency_score}")
+    print(f"source: {feed_url}")
+    print()
 
 
 def require_env(name: str) -> str:

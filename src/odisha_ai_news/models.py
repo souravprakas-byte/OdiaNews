@@ -81,6 +81,7 @@ class ProcessedArticle:
     urgency_score: int
     urgency_reasons: tuple[str, ...]
     image_url: str | None
+    source: str | None = None
     processed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 

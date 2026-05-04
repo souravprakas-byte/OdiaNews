@@ -261,6 +261,7 @@ def process_article(
         urgency_score=urgency_score,
         urgency_reasons=urgency_reasons,
         image_url=article.image_url,
+        source=article.source_id,
     )
 
 
