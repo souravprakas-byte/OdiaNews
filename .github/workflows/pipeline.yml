@@ -1,9 +1,9 @@
 name: Odisha News Pipeline
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: "*/30 * * * *"   # runs every 30 minutes
-  workflow_dispatch:          # allows manual run
+    - cron: "*/15 * * * *"  # allows manual run
 
 jobs:
   run-pipeline:
