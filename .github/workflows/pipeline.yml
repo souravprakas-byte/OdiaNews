@@ -2,33 +2,50 @@ name: Odisha News Pipeline
 
 on:
   workflow_dispatch:
+
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/15 * * * *"   # every 15 minutes
 
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
+    steps:
+      # 1️⃣ Checkout repo
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      # 2️⃣ Setup Python
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
+      # 3️⃣ Install dependencies (FIXED)
       - name: Install dependencies
         run: |
-          pip install requests feedparser python-dateutil scikit-learn
-          pip install sentence-transformers
+          python -m pip install --upgrade pip
+          pip install requests feedparser python-dateutil
+          pip install sentence-transformers scikit-learn numpy
           pip install supabase
 
+      # 4️⃣ Run pipeline
       - name: Run pipeline
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python pipeline.py
+
+      # 5️⃣ Optional: commit local DB/log (SAFE VERSION)
+      - name: Commit DB updates (optional)
+        run: |
+          git config --global user.name "news-bot"
+          git config --global user.email "bot@github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "auto: pipeline update"
+          git push
