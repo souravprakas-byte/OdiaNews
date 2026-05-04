@@ -1,13 +1,12 @@
-from fastapi import FastAPI
-from src.odisha_ai_news.pipeline import main
+import gradio as gr
 
-app = FastAPI()
-
-@app.get("/")
-def home():
-    return {"status": "Odisha News Intelligence running"}
-
-@app.get("/run")
 def run_pipeline():
-    result = main()
-    return {"status": "completed", "result": result}
+    return "Odisha News Intelligence Running ✅"
+
+demo = gr.Interface(
+    fn=run_pipeline,
+    inputs=[],
+    outputs="text"
+)
+
+demo.launch()
