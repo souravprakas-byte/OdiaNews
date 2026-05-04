@@ -341,24 +341,6 @@ def fetch_article_body(url: str) -> tuple[str, str | None]:
     parser.feed(body)
     return parser.text, parser.image_url
 
-def require_env(name: str) -> str:
-    value = os.environ.get(name)
-    if not value:
-        raise RuntimeError(f"Missing required environment variable: {name}")
-    return value
-
-def optional_env(name: str) -> str | None:
-    value = os.environ.get(name)
-    return value.strip() if value and value.strip() else None
-
-def build_telegram_notifier() -> TelegramNotifier | None:
-    bot_token = optional_env("TELEGRAM_TOKEN") or optional_env("BOT_TOKEN")
-    chat_id = optional_env("TELEGRAM_CHAT_ID") or optional_env("CHAT_ID")
-    if not bot_token or not chat_id:
-        print("Telegram env missing; alerts disabled")
-        return None
-    return TelegramNotifier(bot_token, chat_id)
-
 def fetch_all_articles() -> list[RawArticle]:
     all_articles = []
     now_utc = datetime.now(timezone.utc)
@@ -371,32 +353,41 @@ def fetch_all_articles() -> list[RawArticle]:
             for article in entries:
                 entry_time = get_entry_time(article)
                 if entry_time and entry_time < now_utc - timedelta(hours=24):
-                    # Only skip articles older than 24 hours to match the prompt's age penalty engine which expects recent articles
                     continue
                 all_articles.append(article)
         except Exception as e:
             print(f"Feed failed: {feed_url} | Error: {e}")
     return all_articles
 
-def main() -> None:
+def main() -> dict:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
     start_time = time.time()
     print("Pipeline started")
 
-    supabase_url = require_env("SUPABASE_URL")
-    supabase_key = require_env("SUPABASE_KEY")
-    supabase: Client = create_client(supabase_url, supabase_key)
+    SUPABASE_URL = os.getenv("SUPABASE_URL")
+    SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+    TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise RuntimeError("Missing Supabase credentials")
+
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     
-    notifier = build_telegram_notifier()
+    notifier = None
+    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        notifier = TelegramNotifier(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+    else:
+        print("Telegram env missing; alerts disabled")
 
     # STEP 1 & 2: Fetch and Preprocess
     all_articles = fetch_all_articles()
     
     if not all_articles:
         print(f"Finished in {time.time()-start_time:.2f}s")
-        return
+        return {"status": "completed", "clusters_processed": 0, "new_events": 0, "alerts_sent": 0}
 
     # STEP 3 & 4: Batch embed and Cluster
     clusters = cluster_articles(all_articles)
@@ -449,6 +440,12 @@ def main() -> None:
             print(f"Batch insert failed: {e}")
 
     print(f"Pipeline finished in {time.time()-start_time:.2f}s")
+    
+    return {
+        "clusters_processed": len(clusters),
+        "new_events": len(new_clusters),
+        "alerts_sent": len(breaking_clusters)
+    }
 
 if __name__ == "__main__":
     main()

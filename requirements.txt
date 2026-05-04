@@ -1,9 +1,9 @@
-feedparser
+fastapi
+uvicorn
 requests
-beautifulsoup4
-supabase
-openai
-python-dotenv
-sentence-transformers
+feedparser
+python-dateutil
 scikit-learn
+sentence-transformers
+supabase
 numpy
